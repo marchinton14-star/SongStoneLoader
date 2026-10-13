@@ -12,7 +12,8 @@ It does not connect to the internet. The only programs it starts are ffmpeg.exe 
 songs) and Explorer (the OPEN MUSIC FOLDER button). It only writes to `%LOCALAPPDATA%\Ayleid Song Stone` (music,
 settings, spare versions), `Documents\Ayleid Song Stone` (backups of the player's tags and favourites), a temporary
 folder while unzipping, and the mod's own folders in Skyrim's Data folder (`Sound\FX\SongStone` and
-`SKSE\Plugins\StorageUtilData\SongStone`). Songs the player removes go to the Recycle Bin.
+`SKSE\Plugins\StorageUtilData\SongStone`). Songs the player removes go to the Recycle Bin. The first time it opens
+it asks whether to put a shortcut on the desktop, and makes one (a normal Windows .lnk) only if the player says yes.
 
 ## Files
 

@@ -910,6 +910,50 @@ namespace SongStone
 
     // ------------------------------------------------------------------------------------------- Windows' drag picture
     // Without this, the picture of what you're dragging from Explorer is drawn UNDER our always-on-top window.
+    // A desktop shortcut to the loader (Windows' own ShellLink object).
+    static class DesktopShortcut
+    {
+        [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLinkCo { }
+        [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, int fFlags);
+            void GetIDList(out IntPtr ppidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+            void GetHotkey(out short pwHotkey);
+            void SetHotkey(short wHotkey);
+            void GetShowCmd(out int piShowCmd);
+            void SetShowCmd(int iShowCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+            void Resolve(IntPtr hwnd, int fFlags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+        }
+
+        public static string File { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Song Stone Loader.lnk"); } }
+
+        public static void Make(string exe)
+        {
+            var link = (IShellLinkW)new ShellLinkCo();
+            try
+            {
+                link.SetPath(exe);
+                link.SetWorkingDirectory(Path.GetDirectoryName(exe));
+                link.SetIconLocation(exe, 0);
+                link.SetDescription("Add your own music to the Ayleid Song Stone (Skyrim)");
+                ((System.Runtime.InteropServices.ComTypes.IPersistFile)link).Save(File, true);
+            }
+            finally { Marshal.ReleaseComObject(link); }
+        }
+    }
+
     static class DragImage
     {
         [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
@@ -1008,6 +1052,7 @@ namespace SongStone
                 AddLog("Music folder: " + musicDir);
                 if (Tags.Restored) AddLog("Your tags were missing - put them back from the backup in " + Tags.BackupDir);
                 KeepFavourites();
+                BeginInvoke((Action)OfferShortcut);
                 if (startPaths != null && startPaths.Length > 0) AddedSongs(AddPaths(startPaths));
                 else
                 {
@@ -1676,11 +1721,12 @@ namespace SongStone
         // the pop-up, in the window's own style
         class TidyDialog : Form
         {
-            public TidyDialog(LoaderForm owner, string title, string text, string yes, string no)
+            public TidyDialog(LoaderForm owner, string title, string text, string yes, string no, bool small = false)
             {
                 FormBorderStyle = FormBorderStyle.None; StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false; TopMost = true;
                 BackColor = Bg; ForeColor = TextC; Font = owner.fBody; Padding = new Padding(1);
-                Size = new Size(Math.Max(560, (int)(owner.Width * 0.92)), Math.Max(420, (int)(owner.Height * 0.9)));
+                Size = small ? new Size(Math.Max(560, (int)(owner.Width * 0.8)), 330)   // a short question
+                    : new Size(Math.Max(560, (int)(owner.Width * 0.92)), Math.Max(420, (int)(owner.Height * 0.9)));
                 Paint += (s, e) => e.Graphics.DrawRectangle(new Pen(Rule), 0, 0, Width - 1, Height - 1);
                 var head = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Bg };
                 head.Paint += (s, e) =>
@@ -1713,6 +1759,34 @@ namespace SongStone
         // The game keeps the player's favourites (song titles) in Data\SKSE\Plugins\StorageUtilData\SongStone\Favourites.json,
         // which a fresh Skyrim install ("nuking" the game folder) wipes. Every start keeps a copy next to the music folder
         // and puts it back when the game's copy is gone.
+        // A desktop shortcut, offered once (user 2026-10-13: even the mod's author went looking for the loader in the
+        // Creation Kit). Not when the loader runs from inside its zip (Windows runs it from a temporary folder then, and a
+        // shortcut there would break) and not when a shortcut is already on the desktop.
+        void OfferShortcut()
+        {
+            try
+            {
+                string exe = Application.ExecutablePath;
+                if (exe.StartsWith(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase))
+                {
+                    AddLog("Tip: the loader is running from inside its zip. Unzip it first (to your Desktop, say) so you can find it again.");
+                    return;
+                }
+                if (Settings.Get("shortcutAsked") != null || File.Exists(DesktopShortcut.File)) return;
+                Settings.Set("shortcutAsked", "1");
+                string text = "Put a shortcut to Song Stone Loader on your desktop, so it's easy to find next time?\r\n\r\n"
+                    + "The loader is here:\r\n   " + exe + "\r\n\r\n"
+                    + "(You can delete the shortcut any time. This question only comes up once.)";
+                bool yes;
+                using (var d = new TidyDialog(this, "A SHORTCUT ON YOUR DESKTOP?", text, "YES, PLEASE", "NO THANKS", true))
+                    yes = d.ShowDialog(this) == DialogResult.OK;
+                if (!yes) return;
+                DesktopShortcut.Make(exe);
+                AddLog("Put a Song Stone Loader shortcut on your desktop.");
+            }
+            catch (Exception ex) { AddLog("! couldn't make the desktop shortcut: " + ex.Message); }
+        }
+
         void KeepFavourites()
         {
             try
